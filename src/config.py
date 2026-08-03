@@ -1,19 +1,21 @@
 import torch
 
+
 class Config:
-    seed = 42
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    max_len = 384
-    n_folds = 5
+    """Central configuration for the MCQ Solver."""
+
+    # Model name mapping for each supported architecture
     model_name_map = {
         "deberta": "microsoft/deberta-v3-base",
         "roberta": "roberta-base",
-        "scratch": "bert-base-uncased"
+        "scratch": "bert-base-uncased",  # scratch model uses bert-base-uncased tokenizer
     }
 
-def seed_everything(seed):
-    import random
-    import numpy as np
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    # Maximum token length for input sequences
+    max_len = 256
+
+    # Number of cross-validation folds (matching the 5 weight files per arch)
+    n_folds = 5
+
+    # Automatically select GPU if available, otherwise CPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
