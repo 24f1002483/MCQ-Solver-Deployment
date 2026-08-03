@@ -1,6 +1,6 @@
 import os
-import numpy as np
 import torch
+import numpy as np
 from transformers import AutoTokenizer
 from huggingface_hub import hf_hub_download
 from src.config import Config
@@ -10,16 +10,20 @@ from src.models import ModelArchitectureFactory
 _tokenizer_cache = {}
 _model_cache = {}
 
-
 def _get_tokenizer(architecture):
+    """Loads tokenizer with automatic cache-corruption recovery."""
     if architecture not in _tokenizer_cache:
         model_name = Config.model_name_map[architecture]
-        _tokenizer_cache[architecture] = AutoTokenizer.from_pretrained(model_name)
+        try:
+            _tokenizer_cache[architecture] = AutoTokenizer.from_pretrained(model_name)
+        except Exception as e:
+            # If the tokenizer is corrupted, force a fresh download
+            print(f"Tokenizer cache corrupted, re-downloading... Error: {e}")
+            _tokenizer_cache[architecture] = AutoTokenizer.from_pretrained(model_name, force_download=True)
     return _tokenizer_cache[architecture]
 
-
 def _load_checkpoint_weights(target, weights_path):
-    """Load checkpoint into `target` (raw model or HF inner model)."""
+    """Load checkpoint into `target` model."""
     state_dict = torch.load(weights_path, map_location=Config.device, weights_only=True)
     if isinstance(state_dict, dict) and "state_dict" in state_dict:
         state_dict = state_dict["state_dict"]
@@ -27,13 +31,14 @@ def _load_checkpoint_weights(target, weights_path):
     target.load_state_dict(cleaned, strict=True)
     return target
 
-
 def _load_model(architecture, weights_path):
+    """Loads model into memory with caching."""
     cache_key = (architecture, weights_path)
     if cache_key not in _model_cache:
         model_name = Config.model_name_map[architecture]
         model = ModelArchitectureFactory.build_for_inference(architecture, model_name)
 
+        # Apply weights based on model structure
         if architecture == "scratch":
             _load_checkpoint_weights(model, weights_path)
         else:
@@ -44,13 +49,12 @@ def _load_model(architecture, weights_path):
         _model_cache[cache_key] = model
     return _model_cache[cache_key]
 
-
 def predict_single(question, choices, weights_dir, architecture, temperature=0.15):
-    """Predict using weights for the given architecture with temperature scaling."""
+    """Predict using weights for the given architecture."""
     labels = ["A", "B", "C", "D", "E"]
     tokenizer = _get_tokenizer(architecture)
     
-    # Prepare Inputs with explicit prompt formatting
+    # Prepare Inputs
     input_ids_list, attention_mask_list = [], []
     for choice in choices:
         encoded = tokenizer(
@@ -66,13 +70,17 @@ def predict_single(question, choices, weights_dir, architecture, temperature=0.1
     input_ids = torch.tensor([input_ids_list], dtype=torch.long).to(Config.device)
     attention_mask = torch.tensor([attention_mask_list], dtype=torch.long).to(Config.device)
 
-    # Determine Weight File
+    # Determine Weight File (Fallback mechanism)
+    # 1. Look for averaged file
     weight_path = os.path.join(weights_dir, f"{architecture}_avg.pt")
+    
+    # 2. If not found, look for fold 0
     if not os.path.exists(weight_path):
         fold_0_path = os.path.join(weights_dir, f"{architecture}_best_fold_0.pt")
         if os.path.exists(fold_0_path):
             weight_path = fold_0_path
         else:
+            # 3. If missing locally, download from HF
             os.makedirs(weights_dir, exist_ok=True)
             weight_path = hf_hub_download(
                 repo_id="NidhiHe/mcq-solver",
@@ -84,6 +92,7 @@ def predict_single(question, choices, weights_dir, architecture, temperature=0.1
     
     with torch.no_grad():
         outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+        # Apply temperature scaling if needed
         logits = outputs.logits / temperature
         probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
 
