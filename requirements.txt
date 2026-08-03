@@ -1,0 +1,6 @@
+streamlit
+huggingface_hub
+torch
+transformers
+pandas
+numpy
