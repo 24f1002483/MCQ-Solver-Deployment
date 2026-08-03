@@ -1,8 +1,7 @@
 streamlit
-huggingface_hub
 torch
-transformers
-pandas
-numpy
-tiktoken
 torchvision
+transformers
+huggingface_hub
+numpy
+sentencepiece

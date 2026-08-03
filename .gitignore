@@ -1,0 +1,20 @@
+# Ignore virtual environments
+venv/
+venv_old/
+env/
+.venv/
+
+# Ignore caches and temporary directories
+.cache/
+tokenizer_cache/
+.qodo/
+__pycache__/
+*.pyc
+
+# Ignore PyTorch model weights
+*.pt
+weights/*.pt
+
+# Ignore OS files
+.DS_Store
+Thumbs.db

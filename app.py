@@ -1,64 +1,75 @@
-import streamlit as st
 import os
-from huggingface_hub import hf_hub_download
+# Fix DeBERTa-v3 spm.model protobuf parsing error — must be set before any imports
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
+import streamlit as st
 from src.inference import predict_single
 
-# Configuration
-REPO_ID = "NidhiHe/MCQ-solver"
+# Path to local weights folder
 LOCAL_WEIGHTS_DIR = "weights"
 
-@st.cache_resource
-def download_weights():
-    os.makedirs(LOCAL_WEIGHTS_DIR, exist_ok=True)
-    architectures = ["deberta", "roberta", "scratch"]
-    folds = range(5)
-    
-    # Use st.status to show progress in the UI
-    with st.status("Initializing model weights...", expanded=True) as status:
-        for arch in architectures:
-            for fold in folds:
-                filename = f"{arch}_best_fold_{fold}.pt"
-                # Update the message dynamically
-                status.write(f"Checking {filename}...")
-                
-                hf_hub_download(
-                    repo_id=REPO_ID, 
-                    filename=f"weights/{filename}", 
-                    local_dir="."
-                )
-        status.update(label="All weights ready!", state="complete", expanded=False)
-    
-    return LOCAL_WEIGHTS_DIR
+st.set_page_config(page_title="MCQ Solver", page_icon="🧠", layout="centered")
 
-# Initialize weights (this downloads them if they don't exist)
-weights_path = download_weights()
-
-st.title("MCQ Solver")
+st.title("🧠 Multiple Choice Question (MCQ) Solver")
+st.markdown("Fast, accurate MCQ answering engine using lightweight scratch BiLSTM-Attention and pre-trained Transformer models.")
 
 with st.form("mcq_form"):
-    question = st.text_area("Question")
-    c1, c2 = st.columns(2)
-    choices = [
-        c1.text_input("Choice A"), c2.text_input("Choice B"), 
-        c1.text_input("Choice C"), c2.text_input("Choice D"), 
-        st.text_input("Choice E")
-    ]
-    arch = st.selectbox("Select Model Architecture", ["deberta", "roberta", "scratch"])
-    submit = st.form_submit_button("Solve")
+    question = st.text_area("Enter your question here", placeholder="e.g. Which planet is known as the Red Planet?")
+    
+    st.markdown("**Choices**")
+    r1_1, r1_2 = st.columns(2)
+    choice_a = r1_1.text_input("Choice A", placeholder="Earth")
+    choice_b = r1_2.text_input("Choice B", placeholder="Mars")
+    
+    r2_1, r2_2 = st.columns(2)
+    choice_c = r2_1.text_input("Choice C", placeholder="Jupiter")
+    choice_d = r2_2.text_input("Choice D", placeholder="Venus")
+    
+    choice_e = st.text_input("Choice E", placeholder="Saturn")
+    
+    choices = [choice_a, choice_b, choice_c, choice_d, choice_e]
+    
+    # Dropdown to choose architecture — Scratch as default
+    arch = st.selectbox(
+        "Select Model Architecture", 
+        ["scratch", "deberta", "roberta"],
+        index=0,
+        help="Scratch is a lightweight custom BiLSTM model. DeBERTa and RoBERTa are powerful Transformer models with deep semantic knowledge."
+    )
+    
+    submit = st.form_submit_button("Solve MCQ")
 
 if submit:
-    # Use predict_single as requested
-    with st.spinner('Running ensemble inference...'):
-        try:
-            predictions = predict_single(
-                question=question, 
-                choices=choices, 
-                weights_dir=weights_path, 
-                architecture=arch
-            )
-            
-            st.subheader("Ranked Predictions")
-            for i, (label, confidence) in enumerate(predictions):
-                st.write(f"**#{i+1} {label}** — Confidence: {confidence:.2%}")
-        except Exception as e:
-            st.error(f"An error occurred during inference: {e}")
+    if not question.strip():
+        st.warning("Please enter a question.")
+    elif any(not c.strip() for c in choices):
+        st.warning("Please fill in all 5 choices (A-E).")
+    else:
+        with st.spinner(f"Running inference with {arch.upper()} model..."):
+            try:
+                predictions = predict_single(
+                    question=question, 
+                    choices=choices, 
+                    weights_dir=LOCAL_WEIGHTS_DIR, 
+                    architecture=arch
+                )
+                
+                st.success("Inference completed!")
+                st.subheader("📊 Ranked Predictions")
+                
+                # Highlight top predicted choice
+                top_label, top_conf = predictions[0]
+                top_choice_text = choices[ord(top_label) - ord('A')]
+                st.info(f"**Recommended Answer: Choice {top_label}** ({top_choice_text}) — Confidence: **{top_conf:.2%}**")
+                
+                # Note if scratch model was used for general knowledge questions
+                if arch == "scratch":
+                    st.caption("💡 *Tip: For general knowledge questions, try selecting **deberta** or **roberta** in the dropdown for deeper semantic understanding!*")
+                
+                # List all choices with progress bars
+                for label, confidence in predictions:
+                    idx = ord(label) - ord('A')
+                    st.write(f"**Choice {label}** ({choices[idx]}) — Confidence: `{confidence:.2%}`")
+                    st.progress(float(confidence))
+            except Exception as e:
+                st.error(f"Inference error: {e}")
